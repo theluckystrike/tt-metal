@@ -583,6 +583,7 @@ models/demos/deepseek_v3_b1/demo @esmalTT @tt-aho @TT-BrianLiu @sjameelTT @tt-as
 models/demos/deepseek_v3_b1/weights @esmalTT @tt-aho @TT-BrianLiu @sjameelTT @tt-asaigal @tenstorrent/metalium-models-maintainers
 models/demos/deepseek_v3_d_p @tenstorrent/metalium-developers-ds-prefill
 models/demos/gemma4 @handrewsTT @mtairum @uaydonat @dwadhwaniTT @arginugaTT
+models/demos/gemma4_26b_a4b_qb2 @tenstorrent/metalium-models-maintainers @yieldthought @tchedaTT @mtairum @uaydonat
 models/demos/gemma4_31b_qb2 @tenstorrent/metalium-models-maintainers @handrewsTT @dwadhwaniTT @arginugaTT
 models/demos/gemma4_d_p @svuckovicTT @amilovanovicTT @sdjordjevicTT
 models/demos/gpt_oss @uaydonat @mtairum @sraizada-tt @djordje-tt @handrewsTT
