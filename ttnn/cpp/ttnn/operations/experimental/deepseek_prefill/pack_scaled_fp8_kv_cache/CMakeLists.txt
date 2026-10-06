@@ -16,7 +16,7 @@ set_target_properties(
             api
 )
 
-file(GLOB_RECURSE kernels device/kernels/*)
+file(GLOB_RECURSE kernels device/kernels/*.cpp)
 
 target_sources(
     ttnn_op_experimental_deepseek_prefill_pack_scaled_fp8_kv_cache
