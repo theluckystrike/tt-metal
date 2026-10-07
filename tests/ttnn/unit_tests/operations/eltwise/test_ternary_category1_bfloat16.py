@@ -165,16 +165,17 @@ def collapses_to_a_exception(golden, input_a, region, name, detail, *, only_wher
     return (name, build_mask)
 
 
-def difference_underflow_exception(golden, input_a, difference):
+def difference_underflow_exception(golden, input_a, input_b, input_weight, difference):
     """lerp subtracts before it scales, so a b - a that lands on a bf16
-    subnormal is flushed away before the weight ever sees it and lerp returns a
-    for every weight."""
+    subnormal is flushed away before the weight ever sees it and lerp returns
+    the endpoint it is anchored on: a for weight < 0.5, b otherwise."""
+    anchor = torch.where(input_weight < 0.5, input_a, input_b)
     return collapses_to_a_exception(
         golden,
-        input_a,
+        anchor,
         (difference != 0) & (difference.abs() < MIN_NORMAL_BF16),
         "b - a underflows",
-        "device is expected to return a unchanged when b - a flushes to zero",
+        "device is expected to return a (weight < 0.5) or b unchanged when b - a flushes to zero",
         only_where_disagreeing=False,
     )
 
@@ -398,7 +399,7 @@ def test_lerp(device, ttnn_op):
                                                                 total  67,081  0.400%
 
     Only stage 1 excuses its whole range, and it still asserts the stronger
-    property that the device returns a there. The others fire only where the
+    property that the device returns the anchor endpoint there. The others fire only where the
     two sides really disagree -- stages 3 and 4 by more than 1 ULP, stage 2 on
     a non-finite -- so each removes far less than its range would suggest, and
     stage 4 is bounded absolutely before it is waived (worst case on this grid
@@ -406,6 +407,11 @@ def test_lerp(device, ttnn_op):
     the output there is built entirely out of the rounding of b - a, so it is
     far from the golden in both relative and absolute terms by construction.
     The remaining 99.6% is checked at 1 ULP, and 1,068 positions use it.
+
+    The counts above were measured before lerp anchored weight >= 0.5 on b. A
+    host emulation of the kernel over this grid moves stage 2 from 21,516 to 232
+    positions and stage 3 from 28,018 to 1,096, with stages 1 and 4 unchanged;
+    the hardware counts still need re-measuring.
     """
     input_a, input_b, input_weight = ternary_inputs(include_zero=True)
     golden, result = run_ternary(device, ttnn_op, input_a, input_b, input_weight)
@@ -419,28 +425,30 @@ def test_lerp(device, ttnn_op):
 
     stages = [
         # The subtraction lands on a bf16 subnormal, the device flushes it, and
-        # the whole correction term disappears -- the result is exactly a.
+        # the whole correction term disappears -- the result is exactly the
+        # anchor endpoint, a for weight < 0.5 and b otherwise.
         #   a = 1.1755e-38, b = 1.1847e-38, weight = 65536
-        #   b - a = 9.184e-41 -> device 0, so lerp returns a; torch keeps the
+        #   b - a = 9.184e-41 -> device 0, so lerp returns b; torch keeps the
         #   subnormal and reaches 6.0185e-36.
-        difference_underflow_exception(golden, input_a, difference),
+        difference_underflow_exception(golden, input_a, input_b, input_weight, difference),
         # Either intermediate can exceed bf16 max while a + weight * (b - a) is
         # still finite, because the device rounds each step into bf16 and so
         # overflows a binade earlier than the fp32 golden.
-        #   a = 2.1268e37, b = -2.1268e37, weight = 8
-        #   b - a = -4.2535e37, scaled = -3.4028e38, which is past bf16 max but
-        #   not past fp32 max -> device -inf, torch -3.1901e38.
+        #   a = 1.6948e38, b = 4.2369e37, weight = 4
+        #   b - a = -1.2711e38, (weight - 1) * (b - a) = -3.8133e38 -> device
+        #   -inf, torch -3.3895e38.
         # Which non-finite each side lands on is not stable. When b - a passes
         # fp32 max too the golden's own subtraction goes to ±inf, and a zero
         # weight then makes the scale 0 * inf:
         #   a = 2.1268e37, b = -3.3895e38, weight = 0 -> torch NaN, device -inf.
         intermediate_overflow_exception(golden, difference, scaled),
         # When a + weight * (b - a) falls more than a bf16 significand below the
-        # larger operand, every bit of the result came out of the rounding of
-        # b - a.
-        #   a = 1.2622e-29, b = 7.9934e-37, weight = 1
-        #   b - a rounds to -a, so the device loses b entirely and returns
-        #   7.5232e-37 where torch returns b.
+        # larger operand, the result is made of roundings rather than operands.
+        #   a = 1.1755e-38, b = 1.5407e-33, weight = -1.8626e-09
+        #   the scaled term pulls a just under the smallest normal, so the
+        #   device flushes it to 0 where torch keeps 1.1755e-38.
+        # Anchoring weight >= 0.5 on b removed the large-weight half of this
+        # range: a = 1.2622e-29, b = 7.9934e-37, weight = 1 now returns b.
         cancellation_exception(golden, input_a, input_b),
         # Same bottom-binade fence as mac, for results that survived the stages
         # above but still land inside the band. weight * (b - a) landing on a
